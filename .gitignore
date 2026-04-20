@@ -30,6 +30,9 @@ agents/
 .envrc
 maw-js
 
+# Stray local clones of this repo (cleanup 2026-04-20, FORGE)
+maw-js-clone/
+
 # Audio assets — keep local-only, not tracked (cleanup 2026-04-17)
 ui/office/*.mp3
 ui/office/*.wav
