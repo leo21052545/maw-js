@@ -7,6 +7,7 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
+import { createHash } from "crypto";
 import { homedir } from "os";
 import { dirname, extname, join, relative, resolve, sep } from "path";
 
@@ -497,9 +498,63 @@ export function searchOracleText(query: string, limit = 12): OracleSearchResult[
   return maskSecrets(results.sort((a, b) => b.score - a.score).slice(0, limit));
 }
 
+const V1_MARKER_PATH = join(davidOracleRoot(), "ψ", "state", "oracle-bridge", "v1-active");
+
+interface V1MarkerContents {
+  schemaVersion: "v1" | "v0";
+  ratifiedAt: string;
+}
+
+function readV1Marker(): V1MarkerContents | null {
+  if (!existsSync(V1_MARKER_PATH)) return null;
+  try {
+    const data = JSON.parse(readFileSync(V1_MARKER_PATH, "utf8"));
+    if (data.schemaVersion !== "v1") return null;
+    if (!data.ratifiedAt || isNaN(Date.parse(data.ratifiedAt))) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function computeIdempotencyKey(input: Record<string, unknown>): string {
+  const canonical = {
+    kind: input.kind,
+    riskClass: input.riskClass,
+    title: input.title,
+    summary: input.summary,
+    targetPath: input.targetPath,
+    targetId: input.targetId,
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(canonical))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+const SIGNED_BY_ALLOW = new Set([
+  "Codex", "Control Tower", "HELM", "David", "NEXUS",
+  "FORGE", "WATCHDOG", "Leo", "Amy",
+]);
+
+const APPROVAL_OWNERS = new Set([
+  "Leo", "Amy", "HELM", "David", "KaijuPM", "WATCHDOG",
+]);
+
+const RISK_CLASSES = new Set([
+  "read", "propose", "link",
+  "write_oracle", "write_business",
+  "tool_grant", "secret_access",
+  "budget_spend", "external_message",
+  "stock_change", "formula_change", "finance_change",
+  "deploy",
+]);
+
 export function appendOracleIntent(input: Record<string, unknown>) {
+  const v1Active = readV1Marker();
   const title = String(input.title || input.kind || "Oracle intent");
-  const intent = {
+
+  const baseIntent = {
     id: String(input.id || makeId("intent", title)),
     kind: String(input.kind || "general_intent"),
     title,
@@ -511,8 +566,114 @@ export function appendOracleIntent(input: Record<string, unknown>) {
     approvalId: input.approvalId || null,
     createdAt: nowIso(),
   };
-  appendNdjson(stateFile("oracle-bridge", "oracle-intents.ndjson"), intent);
+
+  if (!v1Active) {
+    appendNdjson(stateFile("oracle-bridge", "oracle-intents.ndjson"), baseIntent);
+    return maskSecrets(baseIntent);
+  }
+
+  const requestedByValue = input.requestedBy as string | undefined;
+  const signedByValue = (input.signedBy as string | undefined) ?? requestedByValue;
+
+  const missing: string[] = [];
+  if (!signedByValue) missing.push("signedBy");
+  if (!input.approvalOwner) missing.push("approvalOwner");
+  if (!input.riskClass) missing.push("riskClass");
+  if (missing.length) {
+    return rejectIntent(baseIntent, "missing_field", { fields: missing });
+  }
+
+  if (
+    requestedByValue !== undefined &&
+    (input.signedBy as string | undefined) !== undefined &&
+    requestedByValue !== signedByValue
+  ) {
+    return rejectIntent(baseIntent, "signedBy_requestedBy_mismatch",
+      { signedBy: signedByValue, requestedBy: requestedByValue });
+  }
+
+  if ((input.signedBy as string | undefined) === undefined && requestedByValue !== undefined) {
+    console.warn(
+      "[bridge-writer] requestedBy is deprecated; use signedBy. Will be removed in v1.1.",
+      { intentId: baseIntent.id, requestedBy: requestedByValue },
+    );
+  }
+
+  const signedBy = signedByValue!;
+  const approvalOwner = input.approvalOwner as string;
+  const riskClass = input.riskClass as string;
+
+  if (!SIGNED_BY_ALLOW.has(signedBy)) {
+    return rejectIntent(baseIntent, "bad_signedBy", { value: signedBy });
+  }
+  if (!APPROVAL_OWNERS.has(approvalOwner)) {
+    return rejectIntent(baseIntent, "bad_enum",
+      { field: "approvalOwner", value: approvalOwner });
+  }
+  if (!RISK_CLASSES.has(riskClass)) {
+    return rejectIntent(baseIntent, "bad_enum",
+      { field: "riskClass", value: riskClass });
+  }
+
+  if (signedBy === approvalOwner) {
+    return rejectIntent(baseIntent, "self_approval", { signedBy });
+  }
+
+  const idempotencyKey = (input.idempotencyKey as string | undefined)
+    ?? computeIdempotencyKey(input);
+
+  const intent = {
+    ...baseIntent,
+    idempotencyKey,
+    signedBy,
+    requestedBy: requestedByValue ?? signedBy,
+    approvalOwner,
+    riskClass,
+  };
+
+  appendNdjson(stateFile("oracle-bridge", "oracle-intents.v1.ndjson"), intent);
+  syncToApprovals(intent);
+
   return maskSecrets(intent);
+}
+
+function rejectIntent(
+  base: Record<string, unknown>,
+  reason: string,
+  detail?: Record<string, unknown>,
+): never {
+  const day = new Date().toISOString().slice(0, 10);
+  appendNdjson(
+    stateFile("oracle-bridge", `oracle-intents-rejected-${day}.ndjson`),
+    {
+      rejected_at: nowIso(),
+      rejected_by: "writer",
+      rejection_reason: reason,
+      detail: detail ?? {},
+      original_intent: base,
+    },
+  );
+  throw new Error(`bridge_writer_reject:${reason}`);
+}
+
+function syncToApprovals(intent: Record<string, unknown>): void {
+  if (intent.risk === "L1") return;
+  createControlTowerApprovalDraft({
+    title: String(intent.title || ""),
+    summary: String(intent.summary || ""),
+    risk: intent.risk as KaijuRisk,
+    actionType: "oracle_intent",
+    targetType: "company",
+    targetId: String(intent.targetId || intent.id),
+    requestedBy: String(intent.requestedBy || ""),
+    payload: {
+      intentId: intent.id,
+      idempotencyKey: intent.idempotencyKey,
+      signedBy: intent.signedBy,
+      approvalOwner: intent.approvalOwner,
+      riskClass: intent.riskClass,
+    },
+  });
 }
 
 export function appendOracleLink(input: Record<string, unknown>) {
