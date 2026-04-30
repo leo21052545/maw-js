@@ -498,17 +498,20 @@ export function searchOracleText(query: string, limit = 12): OracleSearchResult[
   return maskSecrets(results.sort((a, b) => b.score - a.score).slice(0, limit));
 }
 
-const V1_MARKER_PATH = join(davidOracleRoot(), "ψ", "state", "oracle-bridge", "v1-active");
-
 interface V1MarkerContents {
   schemaVersion: "v1" | "v0";
   ratifiedAt: string;
 }
 
+function v1MarkerPath(): string {
+  return join(davidOracleRoot(), "ψ", "state", "oracle-bridge", "v1-active");
+}
+
 function readV1Marker(): V1MarkerContents | null {
-  if (!existsSync(V1_MARKER_PATH)) return null;
+  const path = v1MarkerPath();
+  if (!existsSync(path)) return null;
   try {
-    const data = JSON.parse(readFileSync(V1_MARKER_PATH, "utf8"));
+    const data = JSON.parse(readFileSync(path, "utf8"));
     if (data.schemaVersion !== "v1") return null;
     if (!data.ratifiedAt || isNaN(Date.parse(data.ratifiedAt))) return null;
     return data;
