@@ -21,6 +21,11 @@ import { peerExecApi } from "./peer-exec";
 import { proxyApi } from "./proxy";
 import { crossTeamQueueApi } from "./cross-team-queue";
 import { pulseApi } from "./pulse";
+import { kaijuControlTowerApi } from "./kaiju-control-tower";
+import { kaijuMissionRoomApi } from "./kaiju-mission-room";
+import { kaijuCommerceOfficeApi } from "./kaiju-commerce-office";
+import { kaijuOracleBridgeApi } from "./kaiju-oracle-bridge";
+import { kaijuDecisionQueueApi } from "./kaiju-decision-queue";
 import { pluginsRouter } from "./plugins";
 import { uploadApi } from "./upload";
 import { discoverPackages, invokePlugin } from "../plugin/registry";
@@ -58,6 +63,11 @@ export const api = new Elysia({ prefix: "/api" })
   .use(proxyApi)
   .use(crossTeamQueueApi)
   .use(pulseApi)
+  .use(kaijuMissionRoomApi)
+  .use(kaijuCommerceOfficeApi)
+  .use(kaijuOracleBridgeApi)
+  .use(kaijuDecisionQueueApi)
+  .use(kaijuControlTowerApi)
   .use(pluginsRouter)
   .use(uploadApi);
 
