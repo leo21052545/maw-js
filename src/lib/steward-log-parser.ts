@@ -420,6 +420,7 @@ export function mergeStewardWithHardcoded(
     }
 
     merged.push({
+      ...(hard as Record<string, unknown>),
       source: "hardcoded",
       received_from: typeof hard.owner === "string" ? hard.owner : null,
       current_owner: typeof hard.owner === "string" ? hard.owner : null,
@@ -429,7 +430,7 @@ export function mergeStewardWithHardcoded(
       id: hard.id,
       title: typeof hard.title === "string" ? hard.title : hard.id,
       raw: hard as Record<string, unknown>,
-    });
+    } as MergedProject);
   }
 
   return { merged, collisions };
