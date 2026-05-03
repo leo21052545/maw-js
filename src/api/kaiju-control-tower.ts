@@ -3,6 +3,15 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import { homedir } from "os";
 import { dirname, join, relative, resolve, sep } from "path";
 import { davidOracleRoot, readCompanyOsSurfaces } from "../lib/kaiju-state-store";
+import {
+  type HardcodedProject,
+  type MergedProject,
+  type StewardParseResult,
+  mergeStewardWithHardcoded,
+  readStewardLog,
+  stewardLogPath,
+} from "../lib/steward-log-parser";
+import { type AgentOfficeFeed, getAgentOfficeFeed } from "../lib/agent-office-sources";
 
 export const kaijuControlTowerApi = new Elysia();
 
@@ -1041,8 +1050,23 @@ kaijuControlTowerApi.get("/kaiju/control-tower", () => {
   const runnerSync = runOracleSyncCycle("Control Tower Read Sync");
   const state = sanitizeState(readState());
   const companyOs = readCompanyOsSurfaces();
+
+  const stewardResult: StewardParseResult = readStewardLog();
+  const hardcodedProjects = (Array.isArray(latest.projects) ? latest.projects : []) as HardcodedProject[];
+  const { merged: projects, collisions } = mergeStewardWithHardcoded(stewardResult, hardcodedProjects);
+  const agentsOffice: AgentOfficeFeed = getAgentOfficeFeed();
+
   return {
     ...latest,
+    projects: projects as unknown as MergedProject[],
+    stewardLog: {
+      parsed_at: stewardResult.parsed_at,
+      source_path: stewardResult.source_path,
+      row_count: stewardResult.rows.length,
+      warnings: stewardResult.warnings,
+      collisions,
+    },
+    agentsOffice,
     company: state.company,
     agentProfiles: state.agentProfiles,
     issues: state.issues,
@@ -1076,8 +1100,26 @@ kaijuControlTowerApi.get("/kaiju/control-tower", () => {
         health: "watch" as Health,
         owner: "HELM",
       },
+      {
+        label: "Steward Log (Active Projects)",
+        value: stewardResult.warnings.length === 0 ? "Live" : `Live (${stewardResult.warnings.length} warnings)`,
+        source: stewardLogPath(),
+        health: stewardResult.warnings.length === 0 ? ("ok" as Health) : ("watch" as Health),
+        owner: "David",
+      },
+      {
+        label: "Commerce Office Agents Feed",
+        value: `${agentsOffice.real_count} real / ${agentsOffice.mock_count} mock`,
+        source: "~/<agent>-oracle/ψ/memory (7d window)",
+        health: agentsOffice.mock_count === 0 ? ("ok" as Health) : ("watch" as Health),
+        owner: "FORGE",
+      },
     ],
   };
+});
+
+kaijuControlTowerApi.get("/kaiju/commerce-office/agents", () => {
+  return getAgentOfficeFeed();
 });
 
 kaijuControlTowerApi.post("/kaiju/runs/sync-oracle", () => {
