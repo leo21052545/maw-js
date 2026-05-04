@@ -26,6 +26,7 @@ import { kaijuMissionRoomApi } from "./kaiju-mission-room";
 import { kaijuCommerceOfficeApi } from "./kaiju-commerce-office";
 import { kaijuOracleBridgeApi } from "./kaiju-oracle-bridge";
 import { kaijuDecisionQueueApi } from "./kaiju-decision-queue";
+import { kaijuLineBotApi } from "./kaiju-line-bot";
 import { pluginsRouter } from "./plugins";
 import { uploadApi } from "./upload";
 import { discoverPackages, invokePlugin } from "../plugin/registry";
@@ -68,6 +69,7 @@ export const api = new Elysia({ prefix: "/api" })
   .use(kaijuOracleBridgeApi)
   .use(kaijuDecisionQueueApi)
   .use(kaijuControlTowerApi)
+  .use(kaijuLineBotApi)
   .use(pluginsRouter)
   .use(uploadApi);
 
