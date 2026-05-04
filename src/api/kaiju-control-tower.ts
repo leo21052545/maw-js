@@ -12,6 +12,12 @@ import {
   stewardLogPath,
 } from "../lib/steward-log-parser";
 import { type AgentOfficeFeed, getAgentOfficeFeed } from "../lib/agent-office-sources";
+import {
+  APPROVAL_SCHEMA_VERSION,
+  approveProject,
+  loadApprovalPayload,
+  type ApproveRequest,
+} from "../lib/d1-approve";
 
 export const kaijuControlTowerApi = new Elysia();
 
@@ -1054,11 +1060,16 @@ kaijuControlTowerApi.get("/kaiju/control-tower", () => {
   const stewardResult: StewardParseResult = readStewardLog();
   const hardcodedProjects = (Array.isArray(latest.projects) ? latest.projects : []) as HardcodedProject[];
   const { merged: projects, collisions } = mergeStewardWithHardcoded(stewardResult, hardcodedProjects);
+  const projectsWithApproval = projects.map((project) => {
+    const approval = project.source === "steward" ? loadApprovalPayload(project.id) : null;
+    return { ...project, approval };
+  });
   const agentsOffice: AgentOfficeFeed = getAgentOfficeFeed();
 
   return {
     ...latest,
-    projects: projects as unknown as MergedProject[],
+    schema_version: APPROVAL_SCHEMA_VERSION,
+    projects: projectsWithApproval as unknown as MergedProject[],
     stewardLog: {
       parsed_at: stewardResult.parsed_at,
       source_path: stewardResult.source_path,
@@ -1116,6 +1127,67 @@ kaijuControlTowerApi.get("/kaiju/control-tower", () => {
       },
     ],
   };
+});
+
+kaijuControlTowerApi.post("/kaiju/control-tower/approve", async ({ body, set }) => {
+  const input = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const projectId = typeof input.project_id === "string" ? input.project_id : "";
+  const approver = typeof input.approver === "string" ? input.approver : "";
+  const client = typeof input.client === "string" ? input.client : "";
+  const note = typeof input.note === "string" ? input.note : undefined;
+
+  if (!projectId || !approver || !client) {
+    set.status = 400;
+    return {
+      error: "missing required fields",
+      required: ["project_id", "approver", "client"],
+      received: { project_id: projectId, approver, client },
+    };
+  }
+
+  const request: ApproveRequest = { project_id: projectId, approver, client, note };
+  const result = await approveProject(request);
+
+  switch (result.status) {
+    case "approved":
+      return {
+        status: "approved",
+        approved_at: result.approved_at,
+        sentinel_path: result.sentinel_path,
+      };
+    case "already_approved_by_you":
+      return {
+        status: "already_approved_by_you",
+        approved_at: result.approved_at,
+        sentinel_path: result.sentinel_path,
+        original_approver: result.original_approver,
+      };
+    case "approver_mismatch":
+      set.status = 409;
+      return {
+        error: "approver_mismatch",
+        original_approver: result.original_approver,
+        approved_at: result.approved_at,
+        sentinel_path: result.sentinel_path,
+      };
+    case "project_not_found":
+      set.status = 400;
+      return { error: "project_not_found", project_id: result.project_id };
+    case "approver_not_allowed":
+      set.status = 422;
+      return { error: "approver_not_allowed", approver: result.approver, allowed: result.allowed };
+    case "client_not_allowed":
+      set.status = 422;
+      return { error: "client_not_allowed", client: result.client, allowed: result.allowed };
+    case "lock_timeout":
+      set.status = 503;
+      return { error: "lock_timeout", retry_after_ms: 1000 };
+    default: {
+      const _exhaustive: never = result;
+      set.status = 500;
+      return { error: "unexpected_state", debug: _exhaustive };
+    }
+  }
 });
 
 kaijuControlTowerApi.get("/kaiju/commerce-office/agents", () => {
