@@ -18,6 +18,7 @@ import {
   loadApprovalPayload,
   type ApproveRequest,
 } from "../lib/d1-approve";
+import { DEFAULT_LOG_LIMIT, loadProjectDetail } from "../lib/d4-project-detail";
 
 export const kaijuControlTowerApi = new Elysia();
 
@@ -1188,6 +1189,27 @@ kaijuControlTowerApi.post("/kaiju/control-tower/approve", async ({ body, set }) 
       return { error: "unexpected_state", debug: _exhaustive };
     }
   }
+});
+
+kaijuControlTowerApi.get("/kaiju/control-tower/projects/:project_id", ({ params, query, set }) => {
+  const projectId = params.project_id;
+  const queryRecord = (query && typeof query === "object" ? query : {}) as Record<string, unknown>;
+  const logLimitRaw = typeof queryRecord.log_limit === "string" ? queryRecord.log_limit : undefined;
+  const logAllRaw = typeof queryRecord.all === "string" ? queryRecord.all : undefined;
+
+  const logLimit = logLimitRaw !== undefined ? Number.parseInt(logLimitRaw, 10) : undefined;
+  const logAll = logAllRaw === "true" || logAllRaw === "1";
+
+  const result = loadProjectDetail(projectId, {
+    log_limit: Number.isFinite(logLimit) && logLimit !== undefined && logLimit > 0 ? logLimit : DEFAULT_LOG_LIMIT,
+    log_all: logAll,
+  });
+
+  if (result.status === "not_found") {
+    set.status = 404;
+    return { error: "project_not_found", project_id: result.project_id };
+  }
+  return result.payload;
 });
 
 kaijuControlTowerApi.get("/kaiju/commerce-office/agents", () => {
