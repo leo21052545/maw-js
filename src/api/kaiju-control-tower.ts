@@ -1075,6 +1075,7 @@ kaijuControlTowerApi.get("/kaiju/control-tower", () => {
       parsed_at: stewardResult.parsed_at,
       source_path: stewardResult.source_path,
       row_count: stewardResult.rows.length,
+      rows: stewardResult.rows,
       warnings: stewardResult.warnings,
       collisions,
     },
