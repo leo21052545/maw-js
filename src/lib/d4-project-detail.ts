@@ -178,7 +178,7 @@ export function extractRelatedFiles(text: string): string[] {
   return out;
 }
 
-const ETA_PATTERN = /~?(\d+)(?:\s*-\s*(\d+))?\s*active-hr/i;
+const ETA_PATTERN = /~?(\d+)(?:\s*[-\u2013\u2014]\s*(\d+))?\s*active-hr/i;
 
 export function extractEtaActiveHr(text: string): number | null {
   const match = text.match(ETA_PATTERN);

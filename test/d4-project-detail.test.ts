@@ -242,6 +242,14 @@ describe("extractEtaActiveHr", () => {
   test("returns null when no match", () => {
     expect(extractEtaActiveHr("no eta here")).toBeNull();
   });
+
+  test("extracts midpoint from en-dash range '~33–51 active-hr'", () => {
+    expect(extractEtaActiveHr("~33–51 active-hr")).toBe(42);
+  });
+
+  test("extracts midpoint from em-dash range '~33—51 active-hr'", () => {
+    expect(extractEtaActiveHr("~33—51 active-hr")).toBe(42);
+  });
 });
 
 describe("loadProjectDetail — happy paths", () => {
